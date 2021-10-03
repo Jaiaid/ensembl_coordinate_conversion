@@ -5,40 +5,49 @@ use Bio::EnsEMBL::Feature;
 
 # define subroutine to report mapped coordinate
 # it will take slice, seq_start, seq_end, coordinate system to convert to, coordinate system version to convert to
-sub report_human_chromosome_converted_coord
+sub report_same_region_human_chromosome_converted_coord
 {
+    # disable warning message for clarity of output
+    no warnings 'uninitialized';
+
     my $slice = $_[0];
     my $seq_start = $_[1];
     my $seq_end = $_[2];
     my $new_cs = $_[3];
     my $new_cs_version = $_[4];
     
-    # we are only considering human genome
-    my $feature_old_cs = new Bio::EnsEMBL::Feature(-start=>$seq_start, -end=>$seq_end, -slice => $slice);
-    my $tranform_new_cs = $feature_old_cs->transform($new_cs, $new_cs_version);
-    # transform will be undefined if new coordinate system crosses seq region
-    # in that case, we will do project
-    if (not defined $transform_new_cs) {
-        printf("%s,%s mapping crosses seq region\n", $new_cs,$new_cs_version);
-        my $projection_new_cs = $feature_old_cs->project($new_cs, $new_cs_version);
+    # creating feature from slice
+    my $feature_old_cs = new Bio::EnsEMBL::Feature(-start=>$seq_start, -end=>$seq_end, -strand=>1, -slice => $slice);
+    
+    # transform() will be undefined if new coordinate system crosses feature seq region
+    # So, we will do project
+    # printf("%s:%s to %s:%s mapping crosses seq region, using project to found mapping\n", 
+    #     $feature_old_cs->slice()->coord_system()->name(), $feature_old_cs->slice()->coord_system()->version(), $new_cs,$new_cs_version);
 
-        while (my $seg = shift @{$projection_new_cs}) {
-          my $clone = $seg->to_Slice();
-          print "Features current coords ", $seg->from_start, '-',
-            $seg->from_end, " project onto clone coords " .
-            $clone->seq_region_name, ':', $clone->start, '-', $clone->end,
-            $clone->strand, "\n";
+    my $projection_new_cs = $feature_old_cs->project($new_cs, $new_cs_version);
+
+    # to count how many seq can be mapped to new cs:new cs version to same region
+    my $same_region_mapping_count = 0;
+    while (my $seg = shift @{$projection_new_cs}) {
+        my $clone = $seg->to_Slice();
+        # adding $seq_start as seg will show coordinate relative to the seq start coordinate used to generate feature
+        # -1 is done as 1-based coordinate system is used
+        if ($clone->seq_region_name eq $feature_old_cs->seq_region_name()) {
+            print "Features current coords ", $seq_start+$seg->from_start-1, '-',
+                $seq_start+$seg->from_end-1, " project onto clone coords " .
+                $clone->seq_region_name, ':', $clone->start, '-', $clone->end,
+                $clone->strand, "\n";
+
+            $same_region_mapping_count++;
         }
     }
-    else {
-        print "Features current coords ", $transform_new_cs->from_start, '-',
-            $transform_new_cs->from_end, " project onto coords " .
-            $transform_new_cs->seq_region_name, ':', $transform_new_cs->start, '-', $transform_new_cs->end,
-            $transform_new_cs->strand, "\n";
-    }
-    # from experiment it seems transform causes feature to cross seq region, so using project    
-}
 
+    if ($same_region_mapping_count == 0) {
+        printf("No mapping of %s:%s to %s:%s  is found to the same region for seq %d-%d\n", 
+            $feature_old_cs->slice()->coord_system()->name(), $feature_old_cs->slice()->coord_system()->version(), 
+            $new_cs, $new_cs_version, $seq_start, $seq_end);
+    }
+}
 
 
 # check if argv contains necessary input
@@ -77,5 +86,5 @@ my $slice_adaptor = $registry->get_adaptor('Human', 'Core', 'Slice');
 my $slice_grch38 = $slice_adaptor->fetch_by_region('chromosome', $chromosome_number);
     
 # report coordinate conversion
-report_human_chromosome_converted_coord($slice_grch38, $start, $end, $new_cs, $new_cs_version);
+report_same_region_human_chromosome_converted_coord($slice_grch38, $start, $end, $new_cs, $new_cs_version);
 
